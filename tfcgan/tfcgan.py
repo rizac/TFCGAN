@@ -1,240 +1,290 @@
 """
-Created on Thu Nov  3 11:13:02 2022
-@author: reza
-
+core module
 """
 
 from tensorflow import keras
 import numpy as np
 import librosa
-#import scipy as sp
 from scipy.signal import butter, filtfilt
 from scipy.signal.windows import tukey
 from numba import prange
-import numba as nb 
+
+# TODO: check all single-letter variables and params and try to provide a more
+#  meaningful name. Pyhon code conventions say: variables and function names
+#  all LOWERCASE, and at least 3 letters. (for scientific code I usually relax some
+#  conditions, e.g., "g", "pi", "x" "y" are fine, as long as they denote their scientific
+#  counterpart)
+
+# STFT parameters used in pre-processing step:
+win_length = 128 + 64  # Window length
+hop_length = 16  # Hop length
+n_fft = 256  # nfft
 
 
-### STFT parameters used in pre-processing step
-win_length = 128+64 # Window length
-hop_length = 16 # Hop length
-n_fft = 256 #nfft
+# ###############
+# Phase retrieval
+# ###############
 
 
-################################ Phase retireval ##################################
-def PRA_GLA(TF, PRint = 10):
+def pra_gla(tf, pr_int=10):
+    """TODO add doc"""
+    mag = np.abs(tf)
+    phase = np.random.uniform(0, 2 * np.pi, (mag.shape[0], mag.shape[1]))
+    x = librosa.istft(  # TODO at least 3-letter vars, and more meaningful than 'x'
+        mag * np.exp(phase * 1j),
+        hop_length=hop_length,
+        win_length=win_length,
+        length=4000)
     
-    mag = np.abs(TF)
-    phase = np.random.uniform(0, 2*np.pi,(mag.shape[0], mag.shape[1]))  
-    x = librosa.istft(mag * np.exp(phase *1j),  hop_length= hop_length, win_length = win_length, length=4000)
-    
-    for i in range(PRint):
-        
-        TFR = (librosa.stft(x, n_fft=n_fft,  hop_length= hop_length, win_length = win_length))[:128,:248]
-        phase = np.angle(TFR)        
-        TFR = mag *np.exp(1j* phase)
-        x = (librosa.istft(TFR,  hop_length= hop_length, win_length = win_length, length=4000))
-        
-    #S = taper_filter(S, 0.01, 49, 100)
+    for i in range(pr_int):
+        tfr = librosa.stft(
+            x,
+            n_fft=n_fft,
+            hop_length=hop_length,
+            win_length=win_length
+        )[:128, :248]
+        phase = np.angle(tfr)
+        tfr = mag * np.exp(1j * phase)
+        x = librosa.istft(
+            tfr,
+            hop_length=hop_length,
+            win_length=win_length,
+            length=4000)
+
     return x
 
-def PRA_ADMM(TF,  rho, eps, PRint = 10 , ab = 0):
+
+def pra_admm(tf, rho, eps, pr_int=10, ab=0):
     # Code modified from https://github.com//phvial/PRBregDiv
 
-    mag = np.abs(TF)    
-    phase =  np.random.uniform(0, 0.2,(mag.shape[0], mag.shape[1]))
-    TFR =  mag * np.exp(1j * phase)     
-    x = librosa.istft(TFR, hop_length=hop_length, win_length =win_length,length=4000)
-    A = 0
-    x = My_filter(x, 0.05, 48, 100 )
-    for ii in range(PRint):
-        
-        X = librosa.stft(x, hop_length=hop_length, win_length=win_length, n_fft = n_fft)[:128,:248]
-        H = X + (1/rho)* A
-        ph = np.angle(H)
-        U = computeProx(abs(H), mag, rho, eps, ab)
-        Z = U * np.exp(1j* ph)
-        x = librosa.istft(Z-  (1/rho)* A, hop_length=hop_length, win_length=win_length, length=4000)
-        Xhat = librosa.stft(x, hop_length=hop_length, win_length=win_length, n_fft = n_fft)[:128,:248]
-        A = A + rho * (Xhat - Z)
-        
-        x = My_filter(x, 0.05, 48, 100 )
+    mag = np.abs(tf)
+    phase = np.random.uniform(0, 0.2, (mag.shape[0], mag.shape[1]))
+    tfr = mag * np.exp(1j * phase)
+    x = librosa.istft(tfr, hop_length=hop_length, win_length=win_length, length=4000)
+    a = 0
+    x = my_filter(x, 0.05, 48, 100)
+    for ii in range(pr_int):
+        xx = librosa.stft(
+            x,
+            hop_length=hop_length,
+            win_length=win_length,
+            n_fft=n_fft
+        )[:128, :248]
+        h = xx + (1/rho) * a
+        ph = np.angle(h)
+        u = compute_prox(abs(h), mag, rho, eps, ab)
+        z = u * np.exp(1j * ph)
+        x = librosa.istft(
+            z - (1/rho) * a,
+            hop_length=hop_length,
+            win_length=win_length,
+            length=4000)
+        x_hat = librosa.stft(
+            x,
+            hop_length=hop_length,
+            win_length=win_length,
+            n_fft=n_fft
+        )[:128, :248]
+        a = a + rho * (x_hat - z)
+        x = my_filter(x, 0.05, 48, 100)
         
     return x
 
-def computeProx(Y, R, rho, eps, ab):
+
+def compute_prox(y, r, rho, eps, ab):
     # Code modified from https://github.com//phvial/PRBregDiv
-    eps = np.min(R) +eps
+    eps = np.min(r) + eps
     if ab == 1:
-        v=(rho*Y+2*R)/(rho+2)
+        v = (rho * y + 2 * r) / (rho + 2)
         
     if ab == 2:
-        b=1/(R+eps)-rho*Y
-        delta = np.square(b)+4*rho
-        v = (-b+np.sqrt(delta))/(2*rho)
-     
-    #v = 1/rho * ss.lambertw(rho * R * np.exp(rho * Y))
-    #delta = 4*rho*R + np.square(1-Y)
-    #v = (Y - 1 + np.sqrt(delta))/(2*rho)
+        b = 1 / (r + eps) - rho * y
+        delta = np.square(b) + 4 * rho
+        v = (-b + np.sqrt(delta)) / (2 * rho)
 
+    # FIXME: what if v not in (0, 1)? test with different ab results
+    #  in the calling functions
     return v
 
-def my_STFT(x):
-    
-    X = librosa.stft(x, hop_length=hop_length, win_length=win_length, n_fft = n_fft)[:128,:248]    
-    return X
 
-def butter_bandpass(lowcut, highcut, fs, order = 4):
-    
+# TODO: this function is not used. remove?
+# def my_STFT(x):
+#     X = librosa.stft(
+#       x, hop_length=hop_length, win_length=win_length, n_fft = n_fft)[:128,:248]
+#     return X
+
+
+def butter_bandpass(lowcut, highcut, fs, order=4):
+    """TODO add doc"""
     nyq = 0.5 * fs
     low = lowcut / nyq
     high = highcut / nyq
     
     if low <= 0:
-        Wn = high
+        w_n = high
         btype = "lowpass"
     elif high <= 0:
-        Wn = low
+        w_n = low
         btype = "highpass"
     else:
-        Wn = [low, high]
+        w_n = [low, high]
         btype = "bandpass"
 
-    b, a = butter(order, Wn, btype=btype)
+    b, a = butter(order, w_n, btype=btype)
     
     return b, a
 
 
-def My_filter(y, fmin, fmax, samp):
+def my_filter(y, fmin, fmax, samp):  # FIXME: better function name
+    """TODO: add doc"""
     b, a = butter_bandpass(fmin, fmax, samp)
     window_time = tukey(y.shape[-1], 0.1)
     return filtfilt(b, a, y * window_time, axis=-1)
 
 
-################################ TFCGAN #########################################
+# ######
+# TFCGAN
+# ######
 
-class TFCGAN():
+
+class TFCGAN:
     
-    def __init__(self, dirc, scalemin = -10, scalemax = 2.638887, pwr = 1, noise= 100, mtype = 1):
+    def __init__(self,
+                 dirc,
+                 scalemin=-10,
+                 scalemax=2.638887,
+                 pwr=1,
+                 noise=100,
+                 mtype=1):
         """
+        TODO provide doc
         
-        Created on Thu Nov  3 11:13:02 2022
-        @author: reza
-        
-        Input parameters description:
-        dirc: Trained model directory
-        scalemin: Scale factor in Pre-processing step
-        scalemax: Scale factor in pre-processing step
-        pwr: Power spectrum, 
+        :param dirc: Trained model directory
+        :param scalemin: Scale factor in Pre-processing step
+        :param scalemax: Scale factor in pre-processing step
+        :param pwr: Power spectrum,
             1: means absolute value
             2: spectrogram
-        noise: Noise vector
-        mtype: Type of input label
+        :param noise: Noise vector
+        :param mtype: Type of input label
             0: insert labels (Mw, R, Vs30) as a vector
-            1: inset labels (Mw, R, Vs30) separately. 
-            
+            1: inset labels (Mw, R, Vs30) separately.
         """
         
-        self.dirc = dirc # Model directory 
-        self.pwr = pwr # Power or absolute 
+        self.dirc = dirc  # Model directory
+        self.pwr = pwr  # Power or absolute
         self.scalemin = scalemin * self.pwr  # Scaling (clipping the dynamic range)
-        self.scalemax = scalemax * self.pwr # Maximum value 
-        self. noiseint = noise # later space
+        self.scalemax = scalemax * self.pwr  # Maximum value
+        self. noiseint = noise  # later space
         self.dt = 0.01
-        
-        self.Model = keras.models.load_model(self.dirc) # Load the model
+
+        # FIXME: do we just need Keras to load a model? is there a way maybe
+        #  to just install keeras and not the whole tensorflow package?
+        self.model = keras.models.load_model(self.dirc)
         self.mtype = mtype
         
     # Generate TFR
-    def Generator(self, mag, dis, vs,noise, ngen=1):
+    def generator(self, mag, dis, vs, noise, ngen=1):
         """
-        
-        Created on Thu Nov  3 11:13:02 2022
-        @author: reza
-        
         Generate TF representation for one scenario
+
+        :param mag: Magnitude value
+        :param dis: Distance value
+        :param vs: Vs30 value
+        :param noise: TODO provide doc
+        :param ngen: Number of generatation FIXME typo?
         
-        Input parameters description:
-        mag: Magnitude value
-        dis: Distance value
-        Vs: Vs30 value
-        ngen: Number of generatation
-        
-        Output parameter:
-        TF: Descaled Time-frequency representation
+        :return: Descaled Time-frequency representation
         
         """
         
         mag = np.ones([ngen, 1]) * mag
         dis = np.ones([ngen, 1]) * dis
-        vs  = np.ones([ngen, 1]) * vs / 1000
+        vs = np.ones([ngen, 1]) * vs / 1000
         
-        label = np.concatenate([mag,dis, vs ],axis=1)
+        label = np.concatenate([mag, dis, vs], axis=1)
 
         if self.mtype == 0:
-            TF = self.Model.predict([label,  noise])[:,:,:,0]
-        elif self.mtype ==1:
-            TF = self.Model.predict([label[:,0], label[:,1],label[:,2],  noise])[:,:,:,0]
+            tf = self.model.predict([label,  noise])[:, :, :, 0]
+        elif self.mtype == 1:
+            tf = self.model.predict(
+                [label[:, 0], label[:, 1], label[:, 2],  noise]
+            )[:, :, :, 0]
+
+        # FIXME what if self.mtype is not in (0, 1)?
+
+        tf = (tf + 1) / 2
+        tf = (tf * (self.scalemax-self.scalemin)) + self.scalemin
+        tf = (10 ** tf) ** (1 / self.pwr)
         
-        TF = (TF+1)/2
-        TF = (TF* (self.scalemax-self.scalemin)) + self.scalemin
-        TF = (10**TF)**(1/self.pwr)
-        
-        return TF
+        return tf
     
     # Calculate the TF, Time-history, and FAS
-    #@nb.jit(parallel=True)
-    def Maker(self, mag, dis, vs ,  ngen = 1, PRint = 10, mode = "ADMM", rho = 1e-5, eps = 1e-3, ab = 1):
+    #@nb.jit(parallel=True)  # TODO: looks like some parallel processing decorator. Is it used? otherwise remove
+    def maker(self,
+              mag,
+              dis,
+              vs,
+              ngen=1,
+              pr_int=10,
+              mode="ADMM",
+              rho=1e-5,
+              eps=1e-3,
+              ab=1):
         """
-        
-        Genetate accelerogram for one scenario
-        
-        Input parameters description:
-        mag: Magnitude value
-        dis: Distance value
-        Vs: Vs30 value
-        ngen: Number of time-history generatation
-        PRint: Number of iteration in Phase retireval
-        mode: Type of Phase retireval algorithm
+        Generate accelerogram for one scenario
+
+        :param mag: Magnitude value
+        :param dis: Distance value
+        :param vs: Vs30 value
+        :param ngen: Number of time-history generatation
+        :param pr_int: Number of iteration in Phase retireval
+        :param mode: Type of Phase retireval algorithm
             "GLA": Griffin-Lim Algorithm
-            "ADMM": ADMM algorithm for phase retireval based on  Bregman divergences (https://hal.archives-ouvertes.fr/hal-03050635/document)
-        
-        Output parameter:
-        tx: time vector
-        freq = frequency veoctor
-        xh: Generated time-hisory matrix
-        S: Descaled Time-frequency representation matrix 
-        
+            "ADMM": ADMM algorithm for phase retireval based on Bregman
+            divergences (https://hal.archives-ouvertes.fr/hal-03050635/document)
+        :param rho: FIXME: add doc
+        :param eps: FIXME add doc
+        :param ab: FIXME add doc
+
+        :return: a 4-elem,ent tuple  # FIXME: order mismatch? (see code below)
+            tx: time vector
+            freq = frequency veoctor
+            xh: Generated time-hisory matrix
+            S: Descaled Time-frequency representation matrix
         """
 
-        noise = np.random.normal(0, 1, (ngen, self. noiseint))
+        noise = np.random.normal(0, 1, (ngen, self.noiseint))
         
-        S = self.Generator(mag, dis,vs, noise, ngen=ngen)
-        
-        x = np.empty((ngen, 4000))
-        x[:] = 0
+        s = self.generator(mag, dis, vs, noise, ngen=ngen)
+
+        # TODO: two lines below replaced by np.zeros. Check and cleanup in case:
+        # x = np.empty((ngen, 4000))
+        # x[:] = 0
+        x = np.zeros((ngen, 4000))
         
         for i in prange(ngen):
             if mode == "ADMM":
-                x[i,:] = PRA_ADMM(S[i,:,:],rho, eps, PRint, ab)
+                x[i, :] = pra_admm(s[i, :, :], rho, eps, pr_int, ab)
             elif mode == "GLA":
-                x[i,:] = PRA_GLA(S[i,:,:], PRint)
+                x[i, :] = pra_gla(s[i, :, :], pr_int)
+
+            # FIXME: again, what if mode is neither of the two?
                 
         freq, xh = self.fft(x)
-        tx= np.arange(x.shape[1]) * self.dt
+        tx = np.arange(x.shape[1]) * self.dt
         
-        return tx, freq , xh.squeeze(), S, x.squeeze()
+        return tx, freq, xh.squeeze(), s, x.squeeze()  # FIXME: see docstring return
     
-    def fft(self, S):
-        # Unnormalized fft without any norm specification
+    def fft(self, s):
+        # non-normalized fft without any norm specification
         
-        if len(S.shape) == 1: S = S[np.newaxis,:]
+        if len(s.shape) == 1:
+            s = s[np.newaxis, :]
         
-        n = S.shape[1]//2
-        lp = np.abs(np.fft.fft(S, norm = "forward", axis = 1))[:, :n]
+        n = s.shape[1]//2
+        lp = np.abs(np.fft.fft(s, norm="forward", axis=1))[:, :n]
         freq = np.linspace(0, 0.5, n)/self.dt
         
         return freq, lp.T
-    
-
-
 
