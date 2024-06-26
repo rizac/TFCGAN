@@ -10,17 +10,15 @@ import argparse
 from argparse import RawTextHelpFormatter
 
 
-def process(data, param1='', param2=-1.0, verbose=False):
+def process(output_directory:str, mag:float, dist:float, vs30:float, number_of_waveforms:int, verbose=False):
     """TODO add doc
 
-    :param param1: TODO doc
-    :param param2: TODO doc
     :param verbose: (boolean flag) increase verbosity. When given, additional
         info and errors will be printed to stderr. Also in this case, the
         tabular output header will be printed to stdout instead of stderr,
         which is useful to create CSV files with headers
     """
-
+    
 
 def getdoc(param=None):
     """Parse the doc of the `process` function and returns the doc for the
@@ -68,13 +66,10 @@ def cli_entry_point():
     # and a help in the function doc (recommended) and add the argument
     # name here below, with a correponding flag
     for flag, name in [
-        ('-m', 'metadata'),
-        ('-th', 'threshold'),
-        ('-sep', 'sep'),
-        ('-agg', 'aggregate'),
-        ('-wl', 'waveform_length'),
-        ('-dc', 'download_count'),
-        ('-dt', 'download_timeout'),
+        ('-m', 'magnitude'),  # float
+        ('-v', 'vs30'),  # in m/s float
+        ('-d', 'distance'),  # in km, float
+        ('-n', 'number_of_waveforms'),  # int
         ('-v', 'verbose')
     ]:
         param_default, param_doc = getdef(name), getdoc(name)
